@@ -1,0 +1,598 @@
+#include <Arduino.h>
+#include "LiquidCrystal_I2C.h"
+#include <SPI.h>
+#include <MFRC522.h>
+#include <Servo.h>
+
+//RFID pins
+#define RST_PIN 5
+#define SS_PIN 53
+
+//Sensor Data
+#define SNSR_1 2
+#define SNSR_2 3
+#define SNSR_3 18
+
+//Motor Pins
+#define ENA 32
+#define IN1 33
+#define IN2 34
+#define IN3 35
+#define IN4 36
+#define ENB 37
+
+//LED LIGHT
+#define RED 25
+#define GREEN 27
+#define BLUE 29
+
+//Buttons
+#define START 6
+#define STOP 7
+
+//Max Ride Height (Angle)
+#define maxHeight 84.635f
+
+//MFRC key and pin for reader
+MFRC522 mfrc522(SS_PIN, RST_PIN);
+
+const int buttonPin = 2;  // the number of the pushbutton pin
+const int ledPin = 13; 
+int buttonState = 0;
+//Starts motor
+Servo myServoLeft();
+Servo myServoRight();
+Servo myServoPlatform();
+
+//Max Ride Height on first itt (Angle)
+//will use some formula of increasing angle that will allow the ride to accelerate to max height
+//float maxChange = 45f;
+
+//LCD
+LiquidCrystal_I2C lcd(0x27, 20, 4);
+
+//MFRC reader ID
+byte jordanUID[18];
+/* 
+*state = 0 then check if user is logged in
+*state = 1 dispatch mode
+*state = 2 the ride is in motion
+*state = 3 ride finished
+*state = 4 error loop
+*state = 5 normal stop (turns ride off)
+*/
+extern int state = 0;
+
+//% of servo being used?
+int servoState = 0;
+
+//Ride operator
+String user = "";
+
+//unsure list of error codes?
+//int error_codes[n];
+//initialize a queue with max size of n (n is temporary)
+//extern QueueList<int> error_queue(n);
+
+/*
+*function: sets up software
+*default case: sets up software
+*edge case: errors displays on lcd
+*edge case: lcd error light will turn on
+*/
+void setup() {
+    // initialize the LED pin as an output:
+  pinMode(ledPin, OUTPUT);
+  // initialize the pushbutton pin as an input:
+  pinMode(buttonPin, INPUT);
+	lcdSetup();
+  Serial.begin(9600);
+	RFIDsetup();
+	buttonsSetup();
+	//sensorsSetup();
+	lcdInitalState();
+}
+
+
+
+/*void loop()
+{
+  // when characters arrive over the serial port...
+  if (Serial.available()) {
+    // wait a bit for the entire message to arrive
+    delay(100);
+    // clear the screen
+    lcd.clear();
+    // read all the available characters
+    while (Serial.available() > 0) {
+      // display each character to the LCD
+      lcd.write(Serial.read());
+    }
+  }
+}*/
+/*
+*params:
+*function: uses switch case to change the state of the ride. This can be turned on and off when the button is pressed. All function calls will go here to make the ride operate.
+*default case: rfid activates, switches state to active allowing user to dispatch and sets LED to green, loops through dispatch function and switches state to accelerate mode, starts acceleration, acceleration,constant speed, and deceleration functions handle errors, when finished will start constant speed, then finally decelerate, when finished state switches to stationary then constraints will unlock),
+*/
+void loop() {
+  buttonState = digitalRead(buttonPin);
+
+  // check if the pushbutton is pressed. If it is, the buttonState is HIGH:
+  if (buttonState == HIGH) {
+    // turn LED on:
+    lcd.print("Fuck");
+    delay(10000);
+  } else {
+    // turn LED off:
+    digitalWrite(ledPin, LOW);
+  }
+	while(state != 5){
+		switch(state) {
+			case 0: //rfid sign in state
+    				if(user != ""){
+              lcdDefaultState("Jordan");
+              state = 3;
+            }else{
+              lcdRFIDCheck();
+            }    
+            break;
+			case 1: //dispatch
+				//dispatch();
+  				break;
+			case 2:
+				//accelerate();
+  				break;
+			case 3:
+				delay(1000);
+  				break;
+			case 4:
+				//errorLoop();
+  				break;
+			case 5:
+				break;		
+		}
+  	}
+}
+
+/*
+*function: enters on funcStop to keep the LCD running while everything else is turned off
+*default case: same lcd logic as mainLoop
+*/
+/*
+void errorLoop() {
+	if(dispatchISR() == true){
+		mainLoop();
+	}
+	else{
+		delay(100);
+		errorLoop();
+	}
+}
+*/
+//RIDE FUNCTIONS
+/*
+*function:
+*default case: button is pressed state changed to error checking sleeps 5 seconds while error checking
+*edge case: error checking within called functions
+*/
+/*
+void dispatch() {
+	if(dispatchISR() == true){
+		platformDrop();
+    		if(dispatchISR() == true){
+     			delay(500);
+            		state = 2;
+    		}
+    		else{
+      			platformRise();
+      			state = 4;
+      			emergencyStop();
+    		}
+	}
+    	else{
+        	state = 4;
+      		emergencyStop();
+    	}
+}
+*/
+
+/*
+*function: drops paltform and locks seats
+*default case: on dispatch will drop platform (seats lock on there own)
+*edge case: seats not working breaks
+*/
+void platformDrop(){
+	//servoPlatform.write(/*N*/);
+}
+
+/*
+*function: raises paltform and locks seats
+*default case: on dispatch will drop platform (seats lock on there own)
+*edge case: seats not working breaks
+*/
+void platformRise(){
+	//servoPlatform.write(/*-N*/);
+}
+
+/*
+*function: Swing back and forth 4 times and maintains acceleration
+*default case: accelerates to "max" angle on each angle 0 <= n <= max to maintain safe acceleration
+*/
+/*void accelerate() {
+	for(float i = 0; i < 4; i++){ //4 itterations to start descending
+		maxChange += (45/i);
+		for (pos = 0; pos <= maxChange; pos += 1) { //itterates through each angle until ride reaches its peak for that iteration
+			servoLeft.write(pos*-1); //runs servo 1 going in opposite direction
+			servoRight.write(pos); //runs servo 2
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		for (pos = maxChange; pos >= 0; pos -= 1) { //itterates through each angle until ride reaches 0 from the peak for that iteration
+			servoLeft.write(pos*-1); //runs servo 1 going in opposite direction
+			servoRight.write(pos); //runs servo 2
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		maxChange += (45/i++);
+		for (pos = 0; pos <= maxChange; pos += 1) { //itterates through each angle until ride reaches its peak for that iteration
+			servoLeft.write(pos); //runs servo 1
+			servoRight.write(pos*-1); //runs servo 2 going in opposite direction
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		for (pos = maxChange; pos >= 0; pos -= 1) { //itterates through each angle until ride reaches 0 from the peak for that iteration
+			servoLeft.write(pos); //runs servo 1
+			servoRight.write(pos*-1); //runs servo 2 going in opposite direction
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+	}
+	constantSpeed();
+}*/
+
+/*
+*function: Swing back and forth n times and maintains speed n is constant in a loop while error checking
+*default case: accelerates m% on each valley for j distance to maintain speed switches to error check mode while the ride is x distance away from j
+*/
+/*
+void constantSpeed(){
+	for(float i = 0; i < 4; i++){ //4 itterations to start descending
+		for (pos = 0; pos <= maxHeight; pos += 1) { //itterates through each angle until ride reaches its peak for that iteration
+			servoLeft.write(pos*-1); //runs servo 1 going in opposite direction
+			servoRight.write(pos); //runs servo 2
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		for (pos = maxHeight; pos >= 0; pos -= 1) { //itterates through each angle until ride reaches 0 from the peak for that iteration
+			servoLeft.write(pos*-1); //runs servo 1 going in opposite direction
+			servoRight.write(pos); //runs servo 2
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		for (pos = 0; pos <= maxHeight; pos += 1) { //itterates through each angle until ride reaches its peak for that iteration
+			servoLeft.write(pos); //runs servo 1
+			servoRight.write(pos*-1); //runs servo 2 going in opposite direction
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		for (pos = maxHeight; pos >= 0; pos -= 1) { //itterates through each angle until ride reaches 0 from the peak for that iteration
+			servoLeft.write(pos); //runs servo 1
+			servoRight.write(pos*-1); //runs servo 2 going in opposite direction
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+	}
+	decelerate();
+}
+*/
+
+/*
+*function: Swing back and forth n times and maintains speed n is constant in a loop while error checking
+*default case: decelerates m% on each valley for j distance to maintain speed
+no need to implement since stop functions will handle <edge case: if brakeCheck() triggered then, trigger funcStop()> switches to error check mode while the ride is x distance away from j
+* within 6 degrees if each other
+*/
+/*
+void decelerate() {
+	//accelerate in opposite directions?
+	for(float i = 0; i < 4; i++){ //4 itterations to start descending
+		maxChange -= (45/i);
+		for (pos = 0; pos <= maxChange; pos += 1) { //itterates through each angle until ride reaches its peak for that iteration
+			servoRight.write(pos*-1); //runs servo 1 going in opposite direction
+			servoLeft.write(pos); //runs servo 2
+			delay(/*n*); //delays servo by n seconds to not overheat
+		}
+		for (pos = maxChange; pos >= 0; pos -= 1) { //itterates through each angle until ride reaches 0 from the peak for that iteration
+			servoRight.write(pos*-1); //runs servo 1 going in opposite direction
+			servoLeft.write(pos); //runs servo 2
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		maxChange -= (45/i++);
+		for (pos = 0; pos <= maxChange; pos += 1) { //itterates through each angle until ride reaches its peak for that iteration
+			servoLeft.write(pos); //runs servo 1
+			servoRight.write(pos*-1); //runs servo 2 going in opposite direction
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+		for (pos = maxChange; pos >= 0; pos -= 1) { //itterates through each angle until ride reaches 0 from the peak for that iteration
+			servoLeft.write(pos); //runs servo 1
+			servoRight.write(pos*-1); //runs servo 2 going in opposite direction
+			delay(/*n/); //delays servo by n seconds to not overheat
+		}
+	}
+	state = 3;
+}
+*/
+
+/*
+* function: Executes when brake failure during ride
+* default case: Stops all other non error checking functions and lets ride swing until stopped
+*edge case: LCD error cuts power to ride full reset required
+*/
+void funcStop(){
+	decelerateFS();
+	state = 4;
+}
+void decelerateFS() {
+	bool tempState = true;
+	while(tempState = true){
+		//if(tiltSensor == 0){
+			delay(1200);
+			//if(tiltSensor == 0){
+				tempState = false;
+			//}
+		//}
+	}
+	state = 4;
+}
+
+
+//SENSOR INTERRUPTS
+
+/*
+*function: Sets up sensors
+*default case: No sensor error sets sensor up
+*edge case: Sensor error
+*/
+/*void sensorsSetup() {
+	attachInterrupt(digitalPinToInterrupt(SNSR_1), servoLeft, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_2), servoRight, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_3), servoPlatform, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_4), brakeCheck, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_5), engineCheck, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_6), seatCheck1, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_7), seatCheck2, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_8), seatCheck3, CHANGE);
+	attachInterrupt(digitalPinToInterrupt(SNSR_9), seatCheck4, CHANGE);
+}*/
+
+/*
+*function: error checking function saves space
+*/
+/*public bool dispatchISR () {
+	if(seatCheck() && engineCheck() && brakeCheck() && sensorCheck()){
+		setGreen();
+		return true;
+	}
+	else{
+		setRed();
+		return false;
+	}
+}*/
+
+/*
+*function: Functions the same as regular stop
+*default case: Resets system?
+*edge case: if brakeCheck() triggered then, trigger funcStop()
+*/
+/*
+void emergencyStop() {
+	setBlue();
+	if(state != 0 && state != 4){
+		if(state == 2){
+			if(breakCheck == true){
+				declerate();
+			}else{
+				funcStop();
+			}
+		}else{
+			state = 5;
+		}
+	}
+}*/
+
+//ERROR CHECKING
+/*
+*function: checks if seat constraint is functioning only throw on start
+*default case: throws error to LCD
+*/
+/*bool seatCheck(){
+	bool seatCheck = true;
+	for(int i = 0; i < 4; i++){
+		if(seats.get(i).getCurrent()){
+			seatLED.get(i) = setGreen();
+		}
+		else{
+			seatCheck = false;
+			lcd.print("Seat Failure);
+			seatLED.get(i) = setRed();
+		}
+	}
+	return seatCheck;
+}*/
+
+/*
+*function: checks if seat constraint is functioning
+*default case: throws error to LCD
+*/
+/*
+bool engineCheck(){
+	if(/*sensor not working/){
+		lcd.print("Engine Failure);	
+	}
+}
+*/
+/*
+*function: checks if brakes are functioning
+*default case: throws error to LCD
+*edge case: if triggered on deceleration will trigger funcStop()
+*/
+/*
+bool brakeCheck(){
+	if(/*sensor not working/){
+		lcd.print("Brake Failure);
+	}
+}
+*/
+/*
+*function: checks if sensors are functioning
+*default case: throws error to LCD
+*edge case: if triggered on deceleration will trigger funcStop()
+*/
+/*
+bool sensorCheck(){
+	if(/*sensor not working/){
+		lcd.print("Sensor Failure);	
+	}
+}*/
+
+//LCD FUNCTIONS
+void lcdSetup(){
+	lcd.init(); // Initialize the LCD
+	lcd.backlight(); // Turn on the backlight
+}
+void lcdInitalState(){
+	lcd.clear();
+	lcd.setCursor(5,1);
+	lcd.print("SCAN BADGE");
+	lcd.setCursor(5,2);
+	lcd.print("TO SIGN IN");
+}
+void lcdRFIDCheck(){
+  MFRC522::MIFARE_Key key;
+  for (byte i = 0; i < 6; i++) key.keyByte[i] = 0xFF;
+
+  byte block = 4;
+  byte len = 18;
+  MFRC522::StatusCode status;
+
+  if ( ! mfrc522.PICC_IsNewCardPresent()) {
+    return;
+  }
+
+  if ( ! mfrc522.PICC_ReadCardSerial()) {
+    return;
+  }
+  for (uint8_t i = 0; i < 16; i++)
+  {
+    if (jordanUID[i] != 32)
+    {
+      user = user + "" +  jordanUID[i];
+    }
+  }
+}
+void display_employee(String name){
+	int name_offset = 20 - name.length();
+	lcd.setCursor(name_offset,0);
+	lcd.print(name);
+}
+void lcdDefaultState(String name){
+	//setup required for lcd screen
+	lcd.clear();
+	display_employee(name);
+	lcd.setCursor(0,1);
+	lcd.print("ZONE: "); //text remains constant add status starting coordinates (8,1)
+	lcd.setCursor(0,2);
+	lcd.print("Status: OK"); //to change status set cursor at (8,2)
+}
+/*
+void updateStatus(String status, String error_code = "0"){
+	lcd.setCursor(8,1);
+	lcd.print(status);
+	if(status == "Error"){
+		lcd.setCursor(14,2);
+		lcd.print(error_code);
+		lcd.setCursor(0,3);
+		lcd.print("View OP Manual");
+	}
+}
+
+
+void updateZone(int zone_number) { //updates zone on lcd screen
+	lcd.setCursor(8,1);
+	switch(zone_number) {
+		case 1:
+			lcd.print("Dispatch");
+			break;
+		case 2:
+			lcd.print("Brake Run");
+			break;
+		case 5:
+			lcd.print("Elevator");
+			break;
+		default:
+			lcd.print("Unknown");
+			break;
+	}
+}*/
+
+//LED functions
+void setGreen() {
+	digitalWrite(RED,LOW);
+	digitalWrite(BLUE,LOW);
+	digitalWrite(GREEN,HIGH);
+}
+void clearLED() {
+	digitalWrite(RED,LOW);
+	digitalWrite(BLUE,LOW);
+	digitalWrite(GREEN,LOW);
+}
+void setRed() {
+	digitalWrite(RED,HIGH);
+	digitalWrite(BLUE,LOW);
+	digitalWrite(GREEN,LOW);
+}
+void setBlue() {
+	digitalWrite(RED,LOW);
+	digitalWrite(BLUE,HIGH);
+	digitalWrite(GREEN,LOW);
+}
+
+//BUTTON FUNCTIONS
+void buttonsSetup() {
+	//setup required for buttons, pinMode etc.
+	pinMode(RED,OUTPUT);
+	pinMode(GREEN,OUTPUT);
+	pinMode(BLUE,OUTPUT);
+	pinMode(START,INPUT);
+	pinMode(STOP,INPUT);
+}
+
+//RFID FUNCTIONS
+void RFIDsetup(){
+	SPI.begin();
+	mfrc522.PCD_Init(); // Init MFRC522
+}
+
+bool compareUID(byte* uid1, byte* uid2, byte length) {
+	for (byte i = 0; i < length; i++) {
+		if (uid1[i] != uid2[i]) {
+			return false;  // UID does not match
+		}
+	}
+	return true;  // UID matches
+}
+
+void scanRFID(){ //maybe set rfid setup state?
+	if (mfrc522.PICC_IsNewCardPresent() && mfrc522.PICC_ReadCardSerial()) {
+		byte currentUID[4];  // Store the scanned UID
+	
+		for (byte i = 0; i < 4; i++) {
+			currentUID[i] = mfrc522.uid.uidByte[i];
+		}
+		
+		if (compareUID(currentUID, jordanUID, 4)) { //if rfid uid matches
+			state = 1;
+			user = "Jordan";
+		}
+		else { //if rfid uid does not match
+			lcd.clear();
+			lcd.print("No Such User");
+			delay(5000);
+		}
+		mfrc522.PICC_HaltA();
+		mfrc522.PCD_StopCrypto1();
+	}
+}
